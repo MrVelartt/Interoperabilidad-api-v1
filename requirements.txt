@@ -1,4 +1,5 @@
-fastapi==0.115.6            # Última versión compatible con Pydantic v2
+# === Core FastAPI stack ===
+fastapi==0.115.6             # Última versión compatible con Pydantic v2
 uvicorn[standard]==0.30.6    # Servidor ASGI (watchfiles, websockets, etc.)
 starlette==0.41.3            # Framework base de FastAPI
 anyio==4.4.0
@@ -7,24 +8,29 @@ colorama==0.4.6
 watchfiles==1.1.0
 websockets==12.0
 
+# === Pydantic y tipado ===
 pydantic==2.11.3
-pydantic-core==2.23.4
+# pydantic-core se elimina, se instala automáticamente con la versión correcta
 pydantic-settings==2.4.0
 python-dotenv==1.0.1
 typing-extensions==4.12.2
 typing-inspection==0.4.1
 annotated-types==0.7.0
 
-httpx==0.27.0               # Cliente asíncrono HTTP
-xmltodict==0.13.0           # Conversión XML → dict para API Alma BAC
+# === Clientes y utilidades ===
+httpx==0.27.0                # Cliente asíncrono HTTP
+xmltodict==0.13.0            # Conversión XML → dict para API Alma BAC
 PyYAML==6.0.2
 idna==3.7
 
+# === ORM / Base de datos ===
 SQLAlchemy==2.0.36
 asyncpg==0.29.0
 alembic==1.13.2
 
+# === Redis / Caching ===
 redis==5.0.8
 
+# === Testing ===
 pytest==8.3.3
 pytest-asyncio==0.23.8
