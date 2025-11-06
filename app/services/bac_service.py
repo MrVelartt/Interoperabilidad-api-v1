@@ -1,7 +1,8 @@
 import httpx
+import unicodedata
 import xmltodict
 from math import ceil
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from app.core.settings import settings
 
 # === Usuarios Alma (BAC) ===
@@ -145,6 +146,16 @@ async def get_user_details(user_id: str):
         return result
 
 
+def normalize_str(value: str) -> str:
+    """Normaliza acentos, mayúsculas y espacios para comparación segura."""
+    if not value:
+        return ""
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', value)
+        if unicodedata.category(c) != 'Mn'
+    ).strip().lower()
+
+
 async def get_publicaciones(
     region: str | None = None,
     sistema: str | None = None,
@@ -156,7 +167,8 @@ async def get_publicaciones(
     """
     Consulta publicaciones del sistema BAC (Primo API)
     filtrando por región (lds05), sistema (lds08), cultivo (lds07)
-    y tipo de documento (rtype).
+    y tipo de documento (rtype). Aplica coincidencia exacta
+    para 'sistema' y permite búsqueda global sin filtros.
     """
     base_url = f"{settings.PRIMO_API_URL}/search"
 
@@ -171,8 +183,8 @@ async def get_publicaciones(
     if tipo:
         q_parts.append(f"rtype,contains,{tipo}")
 
-    # Si no hay filtros, trae resultados generales (evita error 400)
-    q_param = ";".join(q_parts) if q_parts else "lds08,contains,Extensionista"
+    # ✅ Si no hay filtros, traer resultados globales (no forzar Extensionista)
+    q_param = quote(";".join(q_parts) if q_parts else "any,contains,agrosavia")
 
     query = {
         "vid": "57BAC_INST:BAC",
@@ -185,48 +197,68 @@ async def get_publicaciones(
     }
 
     url = f"{base_url}?{urlencode(query)}&q={q_param}"
+    print(f"🔎 Consultando Primo API: {url}")
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(url)
         response.raise_for_status()
         data = response.json()
 
-        docs = data.get("docs", [])
-        publicaciones = []
+    docs = data.get("docs", [])
+    publicaciones = []
 
-        for d in docs:
-            pnx = d.get("pnx", {}).get("display", {})
-            delivery_links = d.get("delivery", {}).get("link", [])
+    for d in docs:
+        pnx = d.get("pnx", {}).get("display", {})
+        delivery_links = d.get("delivery", {}).get("link", [])
 
-            enlace = next((l["linkURL"] for l in delivery_links if l.get("displayLabel") == "Biblioteca Digital Agropecuaria"), None)
-            thumb = next((l["linkURL"] for l in delivery_links if "thumbnail" in l.get("displayLabel", "").lower()), None)
+        enlace = next((l["linkURL"] for l in delivery_links if l.get("displayLabel") == "Biblioteca Digital Agropecuaria"), None)
+        thumb = next((l["linkURL"] for l in delivery_links if "thumbnail" in l.get("displayLabel", "").lower()), None)
 
-            publicaciones.append({
-                "id": pnx.get("mms", [None])[0],
-                "titulo": pnx.get("title", [None])[0],
-                "autores": pnx.get("creator", []),
-                "tipo": pnx.get("type", [None])[0],
-                "anio": pnx.get("creationdate", [None])[0],
-                "region": pnx.get("lds05", [None])[0],
-                "sistema": pnx.get("lds08", [None])[0],
-                "cultivo": pnx.get("lds07", [None])[0],
-                "institucion": pnx.get("lds09", [None])[0],
-                "enlace": enlace,
-                "thumbnail": thumb
-            })
+        publicaciones.append({
+            "id": pnx.get("mms", [None])[0],
+            "titulo": pnx.get("title", [None])[0],
+            "autores": pnx.get("creator", []),
+            "tipo": pnx.get("type", [None])[0],
+            "anio": pnx.get("creationdate", [None])[0],
+            "region": pnx.get("lds05", [None])[0],
+            "sistema": pnx.get("lds08", [None])[0],
+            "cultivo": pnx.get("lds07", [None])[0],
+            "institucion": pnx.get("lds09", [None])[0],
+            "enlace": enlace,
+            "thumbnail": thumb
+        })
 
-        total = data.get("info", {}).get("total", 0)
-        page = (offset // limit) + 1
-        total_pages = (total // limit) + (1 if total % limit else 0)
+    # ✅ Filtro exacto por sistema (solo Técnico)
+    if sistema:
+        sistema_norm = normalize_str(sistema)
+        publicaciones = [
+            p for p in publicaciones
+            if p.get("sistema") and normalize_str(p["sistema"]) == sistema_norm
+        ]
 
-        return {
-            "total": total,
-            "page": page,
-            "page_size": limit,
-            "total_pages": total_pages,
-            "count": len(publicaciones),
-            "results": publicaciones
-        }
+    # ✅ Eliminar duplicados globales por ID
+    vistos = set()
+    publicaciones_unicas = []
+    for p in publicaciones:
+        pid = p.get("id")
+        if pid and pid not in vistos:
+            publicaciones_unicas.append(p)
+            vistos.add(pid)
+
+    total = data.get("info", {}).get("total", len(publicaciones_unicas))
+    page = (offset // limit) + 1
+    total_pages = ceil(total / limit) if limit else 1
+    has_next_page = total > (offset + limit)
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": limit,
+        "total_pages": total_pages,
+        "has_next_page": has_next_page,
+        "count": len(publicaciones_unicas),
+        "results": publicaciones_unicas
+    }
     
 
     async def get_publicacion_detalle(record_id: str):
