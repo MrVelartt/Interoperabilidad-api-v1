@@ -11,8 +11,5 @@ app = FastAPI(
 # Incluir las rutas
 app.include_router(api_router, prefix="/api/v1")
 
-# Healthcheck
-@app.get("/health")
-def health_check():
-    return {"status": "ok", "environment": settings.ENV}
+
     
