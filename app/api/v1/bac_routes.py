@@ -14,7 +14,7 @@ async def listar_usuarios(
 
     end = offset + len(data) - 1 if data else offset
 
-    response.headers["Content-Range"] = f"items {offset}-{end}/{total}"
+    response.headers["Content-Range"] = f"{offset}-{end}/{total}"
     response.headers["X-Total-Count"] = str(total)
     response.headers["Accept-Ranges"] = "items"
 
@@ -47,7 +47,7 @@ async def listar_publicaciones(
 
     end = offset + len(data) - 1 if data else offset
 
-    response.headers["Content-Range"] = f"items {offset}-{end}/{total}"
+    response.headers["Content-Range"] = f"{offset}-{end}/{total}"
     response.headers["X-Total-Count"] = str(total)
     response.headers["Accept-Ranges"] = "items"
 
