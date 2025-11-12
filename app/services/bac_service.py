@@ -48,14 +48,12 @@ async def get_user_details(user_id: str):
         r.raise_for_status()
         data = xmltodict.parse(r.text)
 
-    u = data.get("user", {})
-    if not isinstance(u, dict):
-        return {"error": "Estructura inesperada"}
+    u = data.get("user", {}) or {}
 
-    contact = u.get("contact_info", {})
-    emails = contact.get("emails", {}).get("email", [])
-    phones = contact.get("phones", {}).get("phone", [])
-    addresses = contact.get("addresses", {}).get("address", [])
+    contact = u.get("contact_info") or {}
+    emails = (contact.get("emails") or {}).get("email", [])
+    phones = (contact.get("phones") or {}).get("phone", [])
+    addresses = (contact.get("addresses") or {}).get("address", [])
 
     if isinstance(emails, dict): emails = [emails]
     if isinstance(phones, dict): phones = [phones]
@@ -83,22 +81,40 @@ async def get_user_details(user_id: str):
         "direccion": direccion,
         "notas": notas,
     }
-
-
 def normalize_str(value: str) -> str:
     if not value:
         return ""
-    return ''.join(c for c in unicodedata.normalize('NFD', value) if unicodedata.category(c) != 'Mn').lower()
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', value)
+        if unicodedata.category(c) != 'Mn'
+    ).lower()
+
+
+# --- Diccionario de equivalencias BAC ---
+TIPO_EQUIVALENCIAS = {
+    "boletin": ["boletin_tecnico", "boletin_divulgativo"],
+    "manual": ["manual", "cartilla", "plegable"],
+    "libro": ["libro", "libro_de_analisis", "libro_resultado_de_investigacion", "capitulo"],
+    "revista": ["articulo_cientifico", "memorias_eventos_academicos"],
+    "informe": ["informe", "estudio_de_vigilancia", "plan", "modelo_productivo"],
+    "audiovisual": ["video", "multimedia", "infografia"],
+    "tesis": ["trabajo_de_grado"],
+    "otros": ["other"]
+}
 
 
 async def get_publicaciones(region=None, sistema=None, cultivo=None, tipo=None, limit=10, offset=0):
     base = f"{settings.PRIMO_API_URL}/search"
 
     q = []
-    if region: q.append(f"lds05,contains,{region}")
-    if sistema: q.append(f"lds08,contains,{sistema}")
-    if cultivo: q.append(f"lds07,contains,{cultivo}")
-    if tipo: q.append(f"rtype,contains,{tipo}")
+    if region:
+        q.append(f"lds05,contains,{region}")
+    if sistema:
+        q.append(f"lds08,contains,{sistema}")
+    if cultivo:
+        q.append(f"lds07,contains,{cultivo}")
+
+
     q = quote(";".join(q) if q else "any,contains,agrosavia")
 
     params = {
@@ -125,8 +141,14 @@ async def get_publicaciones(region=None, sistema=None, cultivo=None, tipo=None, 
         p = d.get("pnx", {}).get("display", {})
         links = d.get("delivery", {}).get("link", [])
 
-        enlace = next((l.get("linkURL") for l in links if l.get("displayLabel") == "Biblioteca Digital Agropecuaria"), None)
-        thumb = next((l.get("linkURL") for l in links if "thumbnail" in l.get("displayLabel", "").lower()), None)
+        enlace = next(
+            (l.get("linkURL") for l in links if l.get("displayLabel") == "Biblioteca Digital Agropecuaria"),
+            None
+        )
+        thumb = next(
+            (l.get("linkURL") for l in links if "thumbnail" in l.get("displayLabel", "").lower()),
+            None
+        )
 
         out.append({
             "id": p.get("mms", [None])[0],
@@ -142,10 +164,21 @@ async def get_publicaciones(region=None, sistema=None, cultivo=None, tipo=None, 
             "thumbnail": thumb
         })
 
+    # --- Filtro sistema (exacto, insensible a mayúsculas/acentos) ---
     if sistema:
         sys_cmp = normalize_str(sistema)
         out = [p for p in out if p.get("sistema") and normalize_str(p["sistema"]) == sys_cmp]
 
+    # --- Filtro tipo con equivalencias ---
+    if tipo:
+        tipo_cmp = normalize_str(tipo)
+        posibles = TIPO_EQUIVALENCIAS.get(tipo_cmp, [tipo_cmp])
+        out = [
+            p for p in out
+            if p.get("tipo") and normalize_str(p["tipo"]) in posibles
+        ]
+
+    # --- Unicidad y conteo total ---
     uniq = {p["id"]: p for p in out if p.get("id")}.values()
     total = data.get("info", {}).get("total", len(uniq))
 
